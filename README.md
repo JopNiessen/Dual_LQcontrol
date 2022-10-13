@@ -21,6 +21,6 @@ Cost function (2) is iterated backward in time (dynamic programming) to compute 
 
 ## Still to do\\
 This version does not include the following\\
-A. *Conjugate* gradient descent\\
-B. Cubic spline interpolation between the (x,theta) grid points.
+* *Conjugate* gradient descent\\
+* Cubic spline interpolation between the (x,theta) grid points.
 
