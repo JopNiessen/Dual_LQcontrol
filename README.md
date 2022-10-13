@@ -6,7 +6,7 @@ This algorithms computes the optimal control law numerically for a one dimention
 
 The cost to go is described by the recursive equation:
 
-(2) $$J_t (x(t), theta(t)) = Ru^2 + sum_b p(b|theta) int_xi dxi N(xi|0,v) (Gx(t+1)^2 + J_{t+1} (x(t+1), theta(t+1)))$$
+(2) $$J_t (x(t), \theta(t)) = Ru^2 + \sum_b p(b|\theta) \int_{\xi} d\xi N(\xi|0,v) (Gx(t+1)^2 + J_{t+1} (x(t+1), \theta(t+1)))$$
 
 And in the final state
 
