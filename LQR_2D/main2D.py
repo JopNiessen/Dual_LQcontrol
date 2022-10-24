@@ -15,10 +15,10 @@ import matplotlib.pyplot as plt
 """
 Run optimal agent
 """
-T = 50
+T = 150
 x0 = np.array([10, 0])
 agent, M, Z = trials2D.run_optimal_agent(x0, T)
-file = open('saved/agent_T{}_v20221024.pickle'.format(T), 'wb')
+file = open('saved/agent_T{}_v20221025.pickle'.format(T), 'wb')
 pickle.dump(agent, file)
 file.close()
 

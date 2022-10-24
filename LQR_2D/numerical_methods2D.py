@@ -7,14 +7,14 @@ last update: 2022.10.24
 
 import numpy as np
 from scipy.stats import multivariate_normal
-from system import update_x, update_theta
+from system2D import update_x, update_theta
 from tqdm import tqdm
 
 
 class LQG_NumericalOptimizer:
     def __init__(self, system_param, B_space):
         """
-        Numerical optimalization algorithm for a LQ system with unknown bias term
+        Numerical optimization algorithm for a LQ system with unknown bias term
         :param system_param: Fully observable system parameters
         :param B_space: Possible bias terms
         """
