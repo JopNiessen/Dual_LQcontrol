@@ -9,7 +9,7 @@ import numpy as np
 
 
 class LQagent:
-    def __init__(self, x0, optimizer, b=np.random.choice([-1, 1]), theta0=0):
+    def __init__(self, x0, optimizer, b=np.random.choice([-1, 1]), theta0=0, bias_perturb=None):
         """
         :param x0: initial position
         :param optimizer: numerical optimization methods earlier computed cost-to-go
@@ -21,6 +21,7 @@ class LQagent:
         self.t_vector = optimizer.t_vector[:-1]
         self.z = np.array([0, x0, theta0, None])
         self.opt = optimizer
+        self.bias_perturb = bias_perturb
 
         self.b_true = b
 
@@ -30,6 +31,8 @@ class LQagent:
         :return: None
         """
         for t in self.t_vector:
+            if t == self.bias_perturb:
+                self.b_true = -self.b_true
             u_star = self.state_update(t)
             self.z = np.vstack((self.z, np.array([t+1, self.x, self.theta, u_star])))
 

@@ -8,7 +8,6 @@ last update: 2022.10.13
 
 import numpy as np
 
-
 class LQsystem:
     def __init__(self):
         self.v = .5

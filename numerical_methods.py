@@ -9,7 +9,7 @@ import numpy as np
 
 
 class LQ_NumericalOptimizer:
-    def __init__(self, system, T=15):
+    def __init__(self, system, T=30):
         """
         Numerical optimization by dynamic programming. Discretization over position, belief and time.
         Numerical integration over biases and noise.
