@@ -43,9 +43,11 @@ class LQG_Agent:
         """Numerical optimizer"""
         self.opt = None
 
-    def run(self):
+    def run(self, perturb=list()):
         """Run agent through environment"""
         for i in range(self.T-1):
+            if i in perturb:
+                self.sys.B = self.sys.B * (-1)
             self.optimal_control()
         self.z['control'].append(0)
         self.z['cost'].append(self.sys.final_cost(self.sys.x))
@@ -105,6 +107,20 @@ class LQG_Agent:
         self.z['ExpBias'].append(Eb)
         self.z['cost'].append(J)
 
+    def reset(self, x0):
+        """Reset system"""
+        self.sys.x = x0
+
+        """Reset agent state"""
+        self.x_est = self.estimate_x()
+        self.belief = 0
+        self.B_est = None
+        self.u = None
+        self.t = 0
+
+        """State memory"""
+        self.z = {'t':[self.t], 'pos':[self.x_est[0]], 'vel':[self.x_est[1]], 'control':[], 'ExpBias':[0], 'cost':[]}
+
 
 class BenchmarkAgent:
     def __init__(self, sys, T):
@@ -116,7 +132,7 @@ class BenchmarkAgent:
         self.T = T
         self.sys = sys
 
-        self.z = {'t': [0], 'pos': [x0[0]], 'vel': [x0[1]], 'control':[0], 'ExpBias':[np.nan], 'cost': []}
+        self.z = {'t': [0], 'pos': [sys.x[0]], 'vel': [sys.x[1]], 'control':[0], 'ExpBias':[np.nan], 'cost': []}
 
     def run(self):
         """Run agent through environment"""

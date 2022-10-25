@@ -74,6 +74,14 @@ class LQG_system:
         """
         return x @ self.F @ x
 
+    def reset(self, x0):
+        """
+        Reset state
+        :param x0: initial state
+        """
+        self.x = x0
+
+
 
 def update_x(A, B, x, u, xi):
     """

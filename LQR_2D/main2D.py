@@ -15,12 +15,17 @@ import matplotlib.pyplot as plt
 """
 Run optimal agent
 """
-T = 150
+T = 6
 x0 = np.array([10, 0])
-agent, M, Z = trials2D.run_optimal_agent(x0, T)
-file = open('saved/agent_T{}_v20221025.pickle'.format(T), 'wb')
-pickle.dump(agent, file)
-file.close()
+agt = trials2D.train_optimal_agent(x0, T)
+agt.run()
+
+#file = open('saved/agent_T{}_v20221024.pickle'.format(T), 'wb')
+#pickle.dump(agent, file)
+#file.close()
+
+M = agt.opt.SolMat
+Z = agt.z
 
 bm_agent, bm_Z = trials2D.run_benchmark(x0, T)
 
