@@ -2,7 +2,7 @@
 Controllers for 2-dimensional LQ systems
 
 by J. Niessen
-last update: 2022.10.24
+created on: 2022.10.24
 """
 
 import numpy as np
@@ -18,19 +18,20 @@ class LQG_Agent:
         """
         self.sys = system
 
+        """System parameters"""
+        self.A = known_param['A']
+        self.C = known_param['C']
+        self.C_inv = np.linalg.inv(self.C)
+        self.v = known_param['v']
+        self.w = known_param['w']
+        self.T = known_param['T']
+
         """Agent state"""
         self.x_est = self.estimate_x()
         self.belief = 0
         self.B_est = None
         self.u = None
         self.t = 0
-
-        """System parameters"""
-        self.A = known_param['A']
-        self.C = known_param['C']
-        self.v = known_param['v']
-        self.w = known_param['w']
-        self.T = known_param['T']
 
         """State memory"""
         self.z = {'t':[self.t], 'pos':[self.x_est[0]], 'vel':[self.x_est[1]], 'control':[], 'ExpBias':[0], 'cost':[]}
@@ -57,7 +58,7 @@ class LQG_Agent:
         Observe current state
         :return: state observation (y)
         """
-        return self.sys.observe()
+        return self.C_inv @ self.sys.observe()
 
     def estimate_theta(self, x_old, x_new, u): #PLACEHOLDER: this function now only updates theta1
         """
@@ -79,7 +80,7 @@ class LQG_Agent:
 
     def optimal_control(self):
         """Finding optimal policy (u*) and exerting the control on the system"""
-        u_star = self.opt.gradient_descent(self.x_est, self.belief, self.t)
+        u_star, J_star = self.opt.gradient_descent(self.x_est, self.belief, self.t)
         x_old = self.x_est
         cost = self.sys.update(u=u_star, info=True)
         self.t += 1

@@ -2,7 +2,7 @@
 Numerical methods for optimal control in a partly observable 2-dimensional LQ system
 
 by J. Niessen
-last update: 2022.10.24
+created on: 2022.10.24
 """
 
 import numpy as np
@@ -10,30 +10,42 @@ from scipy.stats import multivariate_normal
 from system2D import update_x, update_theta
 from tqdm import tqdm
 
+import multiprocessing
+
 
 class LQG_NumericalOptimizer:
-    def __init__(self, system_param, B_space):
+    def __init__(self, system_param, B_space, method='gradient_descent'):
         """
         Numerical optimization algorithm for a LQ system with unknown bias term
         :param system_param: Fully observable system parameters
         :param B_space: Possible bias terms
         """
         self.param = system_param
-        self.u0 = np.zeros(self.param['dim'])
+        self.t = None
 
         """System parameters"""
+        self.dim = self.param['dim']
         self.A = self.param['A']
+        self.C = self.param['C']
         self.W = self.param['w']
+        self.V = self.param['v']
+
+        self.cov_xi = self.W + self.A @ np.linalg.inv(self.C) @ self.V
+        self.cov_theta = self.W + (self.A + np.identity(self.dim)) @ np.linalg.inv(self.C) @ self.V
+        self.cov_theta_inv = np.linalg.inv(self.cov_theta)
+
+        self.u0 = np.zeros(self.dim)
 
         """Discrete time"""
         self.T = self.param['T']
         self.t_vector = np.linspace(0, self.T, self.T + 1).astype(np.int)
 
         """Discrete gaussian noise"""
-        xi_pos = np.linspace(-1, 1, 10) * 10 ** np.sqrt(self.W[0,0])
-        xi_vel = np.linspace(-1, 1, 10) * 10 ** np.sqrt(self.W[1,1])
-        self.xi_matrix = np.transpose(np.meshgrid(xi_pos, xi_vel), (1,2,0))
-        xi_dist = multivariate_normal.pdf(self.xi_matrix, np.array([0,0]), self.W)
+        xi0_cov, xi1_cov = self.cov_xi.diagonal()
+        xi_pos = np.linspace(-1, 1, 10) * 10 ** np.sqrt(xi0_cov)
+        xi_vel = np.linspace(-1, 1, 10) * 10 ** np.sqrt(xi1_cov)
+        self.xi_matrix = np.transpose(np.meshgrid(xi_pos, xi_vel), (1, 2, 0))
+        xi_dist = multivariate_normal.pdf(self.xi_matrix, np.array([0, 0]), self.cov_xi)
         self.xi_dist = xi_dist / np.sum(xi_dist)
 
         """Discrete space of unobserved bias term"""
@@ -48,7 +60,7 @@ class LQG_NumericalOptimizer:
         self.x_amp = np.array([self.pos_amp, self.vel_amp])
 
         """Discrete belief space"""
-        self.theta_amp, self.theta_dim = 13, 50
+        self.theta_amp, self.theta_dim = 13, 25
         self.theta_vector = np.linspace(-1, 1, self.theta_dim) ** 3 * self.theta_amp
 
         """HJB (optimal cost-to-go) matrix"""
@@ -57,24 +69,55 @@ class LQG_NumericalOptimizer:
         """
         Gradient descent parameters
         """
+        self.method = method
         self.lr = .2
         self.tol = 10 ** (-2)
-        self.max_iter = 50
+        self.max_iter = 20
         self.du = np.array([0, 1]) * 1
 
-    def run(self):
+    def run(self, distributed_processing=True):
         """Calculate optimal cost-to-go (J*)"""
-        self.dynamic_programming()
+        if distributed_processing:
+            self.distributed_run()
+        else:
+            self.dynamic_programming()
+
+    def distributed_run(self):
+        """
+        Distributes optimization for the HJB equation for different initial conditions over multiple processes
+        """
+        ispace = np.meshgrid(range(0, self.theta_dim), range(0, self.pos_dim), range(self.vel_dim))
+        ispace = np.array(ispace).reshape([3, -1]).T
+        space = np.meshgrid(self.theta_vector, self.pos_vector, self.vel_vector)
+        space = np.array(space).reshape([3, -1]).T
+        space_lst = [[idx[0], idx[1], idx[2], item[0], item[1], item[2]] for idx, item in zip(ispace, space)]
+        for t in tqdm(self.t_vector[::-1]):
+            self.t = t
+            p = multiprocessing.Pool()
+            Jstar = p.map(self.update_Jstar, space_lst)
+            for itheta, ipos, ivel, it, HJB in Jstar:
+                self.SolMat[ipos, ivel, itheta, it] = HJB
+
+    def update_Jstar(self, info):
+        """
+        Distributed optimization of HJB equation
+        :param info: contains [belief idx, state[0] idx, state[1] idx, belief, state[0], state[1]]
+        :return: [belief idx, state[0] idx, state[1] idx, time, optimal cost-to-go (J*)]
+        """
+        itheta, ipos, ivel, theta, pos, vel = info
+        t = self.t
+        HJB = self.HJB(np.array([pos, vel]), theta, t)  # Calculate optimal cost-to-go
+        return itheta, ipos, ivel, t, HJB
 
     def dynamic_programming(self):
         """
         Calculate J* in discrete time, state and belief space backward in time through dynamic programming
         """
         for t in tqdm(self.t_vector[::-1]):
-            for itheta, theta in enumerate(self.theta_vector):
+            for itheta, theta in tqdm(enumerate(self.theta_vector)):
                 for ix, x in enumerate(self.pos_vector):
                     for ivel, vel in enumerate(self.vel_vector):
-                        HJB = self.HJB(np.array([x, vel]), theta, t) #Calculate optimal cost-to-go
+                        HJB = self.HJB(np.array([x, vel]), theta, t)  # Calculate optimal cost-to-go
                         self.SolMat[ix, ivel, itheta, t] = HJB
 
     def HJB(self, x, theta, t):
@@ -89,8 +132,11 @@ class LQG_NumericalOptimizer:
             # At end-time, this returns the end-cost
             return x.T @ self.param['F'] @ x
         else:
-            u_star = self.gradient_descent(x, theta, t) #Establish the optimal control (u)
-            return self.bellman_eq(x, theta, u_star, t)
+            if self.method == 'gradient_descent':
+                u_star, J_star = self.gradient_descent(x, theta, t)  # Establish the optimal control (u)
+                return J_star
+            else:
+                pass
 
     def gradient_descent(self, x, theta, t):
         """
@@ -103,7 +149,7 @@ class LQG_NumericalOptimizer:
         J_star = np.inf
         u_star = 0
         # Looping over different initial control-values prevents convergence to local minima
-        for u_loc in np.vstack([np.zeros(6), np.linspace(-3,3,6)]).T:
+        for u_loc in np.vstack([np.zeros(6), np.linspace(-3, 3, 6)]).T:
             # Apply gradient descent update until convergence is observed or max_iter time-steps
             for i in range(self.max_iter):
                 gradient = self.numerical_gradient(x, theta, u_loc, t)
@@ -111,12 +157,13 @@ class LQG_NumericalOptimizer:
                 if np.sum(gradient) <= self.tol:
                     break
             J_loc = self.bellman_eq(x, theta, u_loc, t)
-            if J_loc < J_star: # Update the (best) minimum found
+            if J_loc < J_star:  # Update the (best) minimum found
                 J_star = J_loc
                 u_star = u_loc
-        return u_star
+        return u_star, J_star
 
-    def numerical_gradient(self, x, theta, u, t): #PLACEHOLDER: this has to become a 2-D gradient, update both u0 and u1
+    def numerical_gradient(self, x, theta, u,
+                           t):  # PLACEHOLDER: this has to become a 2-D gradient, update both u0 and u1
         """
         Numerical gradient calculation
         :param x: state
@@ -125,7 +172,8 @@ class LQG_NumericalOptimizer:
         :param t: time
         :return: gradient
         """
-        return (self.bellman_eq(x, theta, u + self.du, t) - self.bellman_eq(x, theta, u - self.du, t)) / (2 * self.du[1])
+        return (self.bellman_eq(x, theta, u + self.du, t) - self.bellman_eq(x, theta, u - self.du, t)) / (
+                    2 * self.du[1])
 
     def bellman_eq(self, x, theta, u, t):
         """
@@ -139,7 +187,7 @@ class LQG_NumericalOptimizer:
         jac = u.T @ self.param['R'] @ u
         for b in self.B_space:
             x_new = update_x(self.A, b, x, u, self.xi_matrix)
-            theta_new = update_theta(x, x_new, theta, u, self.W)
+            theta_new = update_theta(x, x_new, theta, u, self.cov_theta_inv)
             Pb = prob_b(b, theta)
             Rnew = np.sum(x_new @ self.param['R'] * x_new, axis=2)
             Jnew = self.get_J(x_new, theta_new, t + 1)
@@ -171,7 +219,7 @@ class LQG_NumericalOptimizer:
         cost = np.array(lst).reshape(coord_shape)
         return cost
 
-    def transformation_x_to_idx(self, x): #PLACEHOLDER: can change this to estimation based on closest nodes
+    def transformation_x_to_idx(self, x):  # PLACEHOLDER: can change this to estimation based on closest nodes
         """
         Transform state (x) to closest idx of cost-to-go matrix
         :param x: position
@@ -222,4 +270,3 @@ def prob_b(b, theta):
     :return: probability of bias (b) given belief (theta)
     """
     return (1 + np.exp(-2 * b[1] * theta)) ** (-1)
-

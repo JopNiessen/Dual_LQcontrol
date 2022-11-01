@@ -2,11 +2,10 @@
 2-Dimensional Linear Quadratic (LQ) system with gaussian noise
 
 by J. Niessen
-last update: 2022.10.24
+created on: 2022.10.24
 """
 
 import numpy as np
-
 
 # For now, it uses timesteps (dt) of 1 sec. With x1 = 'velocity in (m/s)'
 class LQG_system:
@@ -27,7 +26,7 @@ class LQG_system:
         self.A = np.identity(dim) + np.array([[0, dt], [0, -k]])
         self.B = np.array([0, b])
         self.C = np.identity(dim)
-        self.v = np.array([0, 0])
+        self.v = np.array([[.5, 0], [0, 1]])
         self.w = np.array([[.001, 0],[0, .5]])
 
         """Cost parameters"""
@@ -96,7 +95,7 @@ def update_x(A, B, x, u, xi):
     return A @ x + B * u + xi
 
 
-def update_theta(x_old, x_new, theta, u, W):
+def update_theta(x_old, x_new, theta, u, cov_inv):
     """
     Calculate new belief
     :param x_old: previous state x(n-1)
@@ -106,5 +105,6 @@ def update_theta(x_old, x_new, theta, u, W):
     :param W: state covariance matrix
     :return: new belief theta(n)
     """
-    return theta + (x_new - x_old) * u / W[1, 1]
+    #print((theta + (x_new - x_old) * u @ np.linalg.inv(cov)).shape)
+    return theta + (x_new - x_old) * u @ cov_inv
 
