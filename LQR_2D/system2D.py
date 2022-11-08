@@ -26,7 +26,7 @@ class LQG_system:
         self.A = np.identity(dim) + np.array([[0, dt], [0, -k]])
         self.B = np.array([0, b])
         self.C = np.identity(dim)
-        self.v = np.array([[.5, 0], [0, 1]])
+        self.v = np.array([[.5, 0], [0, .5]])
         self.w = np.array([[.001, 0],[0, .5]])
 
         """Cost parameters"""

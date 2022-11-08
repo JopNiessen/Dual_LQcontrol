@@ -16,14 +16,14 @@ if __name__ == '__main__':
     """
     Run optimal agent
     """
-    T = 6
+    T = 100
     x0 = np.array([10, 0])
-    agt = trials2D.train_optimal_agent(x0, T)
-    agt.run()
+    agt = trials2D.train_optimal_agent(x0, T, CE=False)
 
-    #file = open('saved/agent_T{}_v20221101.pickle'.format(T), 'wb')
-    #pickle.dump(agt, file)
-    #file.close()
+    file = open('saved/agent_T{}_v20221109_TRACKING.pickle'.format(T), 'wb')
+    pickle.dump(agt, file)
+    file.close()
+    agt.run()
 
     M = agt.opt.SolMat
     Z = agt.z

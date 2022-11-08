@@ -14,7 +14,7 @@ import multiprocessing
 
 
 class LQG_NumericalOptimizer:
-    def __init__(self, system_param, B_space, method='gradient_descent'):
+    def __init__(self, system_param, B_space, CE=False, CA=False, method='gradient_descent'):
         """
         Numerical optimization algorithm for a LQ system with unknown bias term
         :param system_param: Fully observable system parameters
@@ -22,6 +22,10 @@ class LQG_NumericalOptimizer:
         """
         self.param = system_param
         self.t = None
+        self.CE = CE        # Certainty equivalence
+        self.CA = CA        # Linear interpolation
+
+        self.cube = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1]])
 
         """System parameters"""
         self.dim = self.param['dim']
@@ -42,17 +46,21 @@ class LQG_NumericalOptimizer:
 
         """Discrete gaussian noise"""
         xi0_cov, xi1_cov = self.cov_xi.diagonal()
-        xi_pos = np.linspace(-1, 1, 10) * 10 ** np.sqrt(xi0_cov)
-        xi_vel = np.linspace(-1, 1, 10) * 10 ** np.sqrt(xi1_cov)
-        self.xi_matrix = np.transpose(np.meshgrid(xi_pos, xi_vel), (1, 2, 0))
-        xi_dist = multivariate_normal.pdf(self.xi_matrix, np.array([0, 0]), self.cov_xi)
-        self.xi_dist = xi_dist / np.sum(xi_dist)
+        if not self.CE:
+            xi_pos = np.linspace(-1, 1, 10) * 10 ** np.sqrt(xi0_cov)
+            xi_vel = np.linspace(-1, 1, 10) * 10 ** np.sqrt(xi1_cov)
+            self.xi_matrix = np.transpose(np.meshgrid(xi_pos, xi_vel), (1, 2, 0))
+            xi_dist = multivariate_normal.pdf(self.xi_matrix, np.array([0, 0]), self.cov_xi)
+            self.xi_dist = xi_dist / np.sum(xi_dist)
+        else:
+            self.xi_matrix = 0
+            self.xi_dist = 1
 
         """Discrete space of unobserved bias term"""
         self.B_space = B_space
 
         """Discrete state space"""
-        self.x_dim = 20
+        self.x_dim = 30
         self.pos_amp, self.pos_dim = 9, self.x_dim
         self.pos_vector = np.linspace(-1, 1, self.pos_dim) * self.pos_amp
         self.vel_amp, self.vel_dim = 9, self.x_dim
@@ -60,7 +68,7 @@ class LQG_NumericalOptimizer:
         self.x_amp = np.array([self.pos_amp, self.vel_amp])
 
         """Discrete belief space"""
-        self.theta_amp, self.theta_dim = 13, 25
+        self.theta_amp, self.theta_dim = 13, 40
         self.theta_vector = np.linspace(-1, 1, self.theta_dim) ** 3 * self.theta_amp
 
         """HJB (optimal cost-to-go) matrix"""
@@ -70,8 +78,8 @@ class LQG_NumericalOptimizer:
         Gradient descent parameters
         """
         self.method = method
-        self.lr = .2
-        self.tol = 10 ** (-2)
+        self.lr = 1
+        self.tol = 10 ** (-1)
         self.max_iter = 20
         self.du = np.array([0, 1]) * 1
 
@@ -149,12 +157,13 @@ class LQG_NumericalOptimizer:
         J_star = np.inf
         u_star = 0
         # Looping over different initial control-values prevents convergence to local minima
-        for u_loc in np.vstack([np.zeros(6), np.linspace(-3, 3, 6)]).T:
+        for itrial, u_loc in enumerate(np.vstack([np.zeros(6), np.linspace(-3, 3, 6)]).T):
             # Apply gradient descent update until convergence is observed or max_iter time-steps
             for i in range(self.max_iter):
                 gradient = self.numerical_gradient(x, theta, u_loc, t)
-                u_loc -= self.lr * gradient
-                if np.sum(gradient) <= self.tol:
+                decay = (1 + self.max_iter - i) / self.max_iter
+                u_loc -= decay * self.lr * gradient
+                if abs(np.sum(gradient)) <= self.tol:
                     break
             J_loc = self.bellman_eq(x, theta, u_loc, t)
             if J_loc < J_star:  # Update the (best) minimum found
@@ -171,6 +180,18 @@ class LQG_NumericalOptimizer:
         :param u: control
         :param t: time
         :return: gradient
+        """
+        """
+        # This part is not finished
+        jac = .5 * self.param['R'] @ u
+        for b in self.B_space:
+            x_new = update_x(self.A, b, x, u, self.xi_matrix)
+            theta_new = update_theta(x, x_new, theta, u, self.cov_theta_inv)
+            Pb = prob_b(b, theta)
+            Rnew = b.T @ self.param['Q'] @ b @ u + 2 * x.T @ self.A.T @ self.param['Q'] @ b
+            !!! Jnew = self.get_J(x_new, theta_new, t + 1) > deriv wrt u
+            EJ = np.sum(self.xi_dist * (Rnew + Jnew))
+            jac += Pb * EJ
         """
         return (self.bellman_eq(x, theta, u + self.du, t) - self.bellman_eq(x, theta, u - self.du, t)) / (
                     2 * self.du[1])
@@ -189,8 +210,14 @@ class LQG_NumericalOptimizer:
             x_new = update_x(self.A, b, x, u, self.xi_matrix)
             theta_new = update_theta(x, x_new, theta, u, self.cov_theta_inv)
             Pb = prob_b(b, theta)
-            Rnew = np.sum(x_new @ self.param['R'] * x_new, axis=2)
-            Jnew = self.get_J(x_new, theta_new, t + 1)
+            if self.CE:
+                Rnew = x_new @ self.param['R'] @ x_new
+            else:
+                Rnew = np.sum(x_new @ self.param['R'] * x_new, axis=2)
+            if self.CA:
+                Jnew = self.cartesian_average(x_new, theta_new, t+1)
+            else:
+                Jnew = self.get_J(x_new, theta_new, t + 1)
             EJ = np.sum(self.xi_dist * (Rnew + Jnew))
             jac += Pb * EJ
         return jac
@@ -207,17 +234,74 @@ class LQG_NumericalOptimizer:
         x = self.transformation_x_to_idx(x)
         theta = self.transform_theta_to_idx(theta)
 
-        # Reshape for efficient calculation
-        coord = np.dstack([x, theta])
-        coord_shape = coord.shape[:2]
-        coord = coord.reshape(-1, coord.shape[-1])
+        if self.CE:
+            return self.SolMat[x[0], x[1], theta[-1], t]
+        else:
+            # Reshape for efficient calculation
+            coord = np.dstack([x, theta])
+            coord_shape = coord.shape[:2]
+            coord = coord.reshape(-1, coord.shape[-1])
 
-        # Get J* from the earlier established tensor in memory
-        lst = self.SolMat[coord[:, 0], coord[:, 1], coord[:, 3], t]
+            # Get J* from the earlier established tensor in memory
+            lst = self.SolMat[coord[:, 0], coord[:, 1], coord[:, 3], t]
 
-        # Transform to original shape
-        cost = np.array(lst).reshape(coord_shape)
-        return cost
+            # Transform to original shape
+            cost = np.array(lst).reshape(coord_shape)
+            return cost
+
+    def cartesian_average(self, x, theta, t):
+        """
+        Interpolation of optimal cost-to-go through linear weighted averaging
+        :param x: state
+        :param theta: belief
+        :param t: time
+        :return: iterpolated cost-to-go
+        """
+        # transform x to idx
+        x = (x + self.x_amp) / (2 * self.x_amp)
+        x = (self.x_dim - 1) * self.bind(x)
+        x_min = x.astype(np.int)
+        x = x - x_min
+
+        # transform theta to idx
+        sign = np.sign(theta)
+        theta = (self.theta_dim - 1) * (self.bind((abs(theta) / self.theta_amp) ** (1 / 3)) * sign + 1) / 2
+        theta_min = theta.astype(np.int)
+        theta = theta - theta_min
+
+        # Calculate cartesian estimate
+        if self.CE:
+            M = self.SolMat[x_min[0]:x_min[0] + 2, x_min[1]:x_min[1] + 2, theta_min[1]:theta_min[1] + 2, t]
+            coord = np.hstack([x, theta[1]])
+            J = self.cartesian_estimate(coord, M)
+        else:
+            coord_min = np.dstack([x_min, theta_min])
+            coord = np.dstack([x, theta[:, :, 1]])
+            true_shape = coord.shape[:2]
+            coord_min = coord_min.reshape(-1, coord_min.shape[-1])
+            coord = coord.reshape(-1, coord.shape[-1])
+            J = list()
+            for c, c_min in zip(coord, coord_min):
+                M = self.SolMat[c_min[0]:c_min[0] + 2, c_min[1]:c_min[1] + 2, c_min[3]:c_min[3] + 2, t]
+                J.append(self.cartesian_estimate(c, M))
+            J = np.array(J).reshape(true_shape)
+        return J
+
+    def cartesian_estimate(self, coord, matrix):
+        """
+        Linear weighted interpolation
+        :param coord: normalized coordinates
+        :param matrix: nearest neighbor matrix
+        :return:
+        """
+        dim = np.sqrt(3)
+        norm = 0
+        J = 0
+        for c in self.cube:
+            fac = dim - np.linalg.norm(coord - c)
+            norm += fac
+            J += fac * matrix[c[0], c[1], c[2]]
+        return J / norm
 
     def transformation_x_to_idx(self, x):  # PLACEHOLDER: can change this to estimation based on closest nodes
         """
@@ -227,8 +311,8 @@ class LQG_NumericalOptimizer:
         """
         x = (x + self.x_amp) / (2 * self.x_amp)
         x = (self.x_dim - 1) * self.bind(x)
-        x = (x + .5).astype(np.int)
-        return x
+        idx = (x + .5).astype(np.int)
+        return idx
 
     def transform_theta_to_idx(self, theta):
         """
@@ -246,8 +330,8 @@ class LQG_NumericalOptimizer:
         :param arr: array of integers or floats
         :return: array of integers or floats, bound to range [0,1]
         """
-        arr[arr < 0] = 0
-        arr[arr > 1] = 1
+        arr[arr <= 0] = .001
+        arr[arr >= 1] = .999
         return arr
 
 
@@ -270,3 +354,5 @@ def prob_b(b, theta):
     :return: probability of bias (b) given belief (theta)
     """
     return (1 + np.exp(-2 * b[1] * theta)) ** (-1)
+
+

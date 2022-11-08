@@ -35,6 +35,7 @@ class LQG_Agent:
 
         """State memory"""
         self.z = {'t':[self.t], 'pos':[self.x_est[0]], 'vel':[self.x_est[1]], 'control':[], 'ExpBias':[0], 'cost':[]}
+        self.gamma = list()
 
         """Possible values of unknown system parameter"""
         b_one = np.array([0, 1])*(-1)
@@ -80,7 +81,9 @@ class LQG_Agent:
 
     def optimal_control(self):
         """Finding optimal policy (u*) and exerting the control on the system"""
-        u_star, J_star = self.opt.gradient_descent(self.x_est, self.belief, self.t)
+        u_star, _ = self.opt.gradient_descent(self.x_est, self.belief, self.t)
+        u_opt, _ = self.opt.gradient_descent(self.x_est, self.sys.B[1]*np.inf, self.t)
+        self.gamma.append(abs(u_star)/abs(u_opt))
         x_old = self.x_est
         cost = self.sys.update(u=u_star, info=True)
         self.t += 1
@@ -121,6 +124,7 @@ class LQG_Agent:
 
         """State memory"""
         self.z = {'t':[self.t], 'pos':[self.x_est[0]], 'vel':[self.x_est[1]], 'control':[], 'ExpBias':[0], 'cost':[]}
+        self.gamma = list()
 
 
 class BenchmarkAgent:
